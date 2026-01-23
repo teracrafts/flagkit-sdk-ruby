@@ -3,7 +3,6 @@
 module FlagKit
   # Configuration options for the FlagKit SDK.
   class Options
-    DEFAULT_BASE_URL = "https://api.flagkit.dev/api/v1"
     DEFAULT_POLLING_INTERVAL = 30
     DEFAULT_CACHE_TTL = 300
     DEFAULT_MAX_CACHE_SIZE = 1000
@@ -15,7 +14,6 @@ module FlagKit
     DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT = 30
 
     attr_reader :api_key,
-                :base_url,
                 :polling_interval,
                 :cache_ttl,
                 :max_cache_size,
@@ -32,7 +30,6 @@ module FlagKit
                 :storage
 
     # @param api_key [String] The API key
-    # @param base_url [String] The base URL
     # @param polling_interval [Integer] Polling interval in seconds
     # @param cache_ttl [Integer] Cache TTL in seconds
     # @param max_cache_size [Integer] Maximum cache size
@@ -49,7 +46,6 @@ module FlagKit
     # @param storage [Object, nil] Storage adapter
     def initialize(
       api_key:,
-      base_url: DEFAULT_BASE_URL,
       polling_interval: DEFAULT_POLLING_INTERVAL,
       cache_ttl: DEFAULT_CACHE_TTL,
       max_cache_size: DEFAULT_MAX_CACHE_SIZE,
@@ -66,7 +62,6 @@ module FlagKit
       storage: nil
     )
       @api_key = api_key
-      @base_url = base_url
       @polling_interval = polling_interval
       @cache_ttl = cache_ttl
       @max_cache_size = max_cache_size
@@ -88,7 +83,6 @@ module FlagKit
     # @raise [Error] If validation fails
     def validate!
       validate_api_key!
-      validate_base_url!
       validate_positive_integers!
     end
 
@@ -100,17 +94,6 @@ module FlagKit
       unless api_key.start_with?("sdk_", "srv_", "cli_")
         raise Error.config_error(ErrorCode::CONFIG_INVALID_API_KEY, "Invalid API key format")
       end
-    end
-
-    def validate_base_url!
-      return if base_url.nil? || base_url.empty?
-
-      uri = URI.parse(base_url)
-      unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
-        raise Error.config_error(ErrorCode::CONFIG_INVALID_BASE_URL, "Invalid base URL")
-      end
-    rescue URI::InvalidURIError
-      raise Error.config_error(ErrorCode::CONFIG_INVALID_BASE_URL, "Invalid base URL")
     end
 
     def validate_positive_integers!

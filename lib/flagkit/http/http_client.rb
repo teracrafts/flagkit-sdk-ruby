@@ -7,21 +7,21 @@ module FlagKit
   module Http
     # HTTP client with retry logic and circuit breaker integration.
     class HttpClient
+      BASE_URL = "https://api.flagkit.dev/api/v1"
       BASE_RETRY_DELAY = 1.0
       MAX_RETRY_DELAY = 30.0
       RETRY_MULTIPLIER = 2.0
       JITTER_FACTOR = 0.1
 
-      attr_reader :base_url, :api_key, :timeout, :retry_attempts, :circuit_breaker
+      attr_reader :api_key, :timeout, :retry_attempts, :circuit_breaker
 
-      # @param base_url [String] The base URL
       # @param api_key [String] The API key
       # @param timeout [Integer] Request timeout in seconds
       # @param retry_attempts [Integer] Number of retry attempts
       # @param circuit_breaker [CircuitBreaker] The circuit breaker
       # @param logger [Object, nil] Logger instance
-      def initialize(base_url:, api_key:, timeout:, retry_attempts:, circuit_breaker:, logger: nil)
-        @base_url = base_url.chomp("/")
+      def initialize(api_key:, timeout:, retry_attempts:, circuit_breaker:, logger: nil)
+        @base_url = BASE_URL
         @api_key = api_key
         @timeout = timeout
         @retry_attempts = retry_attempts
@@ -51,7 +51,7 @@ module FlagKit
       private
 
       def build_connection
-        Faraday.new(url: base_url) do |conn|
+        Faraday.new(url: @base_url) do |conn|
           conn.options.timeout = timeout
           conn.options.open_timeout = timeout
           conn.headers["Content-Type"] = "application/json"

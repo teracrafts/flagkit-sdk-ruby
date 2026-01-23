@@ -55,7 +55,6 @@ FlagKit.shutdown
 ```ruby
 client = FlagKit.initialize(
   'sdk_your_api_key',
-  base_url: 'https://api.flagkit.dev/api/v1',  # API base URL
   polling_interval: 30,                         # Seconds between polls
   cache_ttl: 300,                               # Cache time-to-live in seconds
   cache_enabled: true,                          # Enable/disable caching

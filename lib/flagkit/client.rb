@@ -20,7 +20,6 @@ module FlagKit
       )
 
       @http_client = HttpClient.new(
-        base_url: options.base_url,
         api_key: options.api_key,
         timeout: options.timeout,
         retry_attempts: options.retry_attempts,

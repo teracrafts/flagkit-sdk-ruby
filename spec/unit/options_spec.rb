@@ -10,7 +10,6 @@ RSpec.describe FlagKit::Options do
       options = described_class.new(api_key: valid_api_key)
 
       expect(options.api_key).to eq(valid_api_key)
-      expect(options.base_url).to eq("https://api.flagkit.dev/api/v1")
       expect(options.polling_interval).to eq(30)
       expect(options.cache_ttl).to eq(300)
       expect(options.max_cache_size).to eq(1000)
@@ -27,13 +26,11 @@ RSpec.describe FlagKit::Options do
     it "accepts custom values" do
       options = described_class.new(
         api_key: valid_api_key,
-        base_url: "https://custom.api.com",
         polling_interval: 60,
         cache_ttl: 600,
         cache_enabled: false
       )
 
-      expect(options.base_url).to eq("https://custom.api.com")
       expect(options.polling_interval).to eq(60)
       expect(options.cache_ttl).to eq(600)
       expect(options.cache_enabled).to be false
@@ -70,14 +67,6 @@ RSpec.describe FlagKit::Options do
       %w[sdk_ srv_ cli_].each do |prefix|
         options = described_class.new(api_key: "#{prefix}test_key")
         expect { options.validate! }.not_to raise_error
-      end
-    end
-
-    it "raises error for invalid base URL" do
-      expect do
-        described_class.new(api_key: valid_api_key, base_url: "not-a-url").validate!
-      end.to raise_error(FlagKit::Error) do |error|
-        expect(error.code).to eq(FlagKit::ErrorCode::CONFIG_INVALID_BASE_URL)
       end
     end
 
