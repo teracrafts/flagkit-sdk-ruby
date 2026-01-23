@@ -1,19 +1,29 @@
 # frozen_string_literal: true
 
 require_relative "flagkit/version"
-require_relative "flagkit/error"
-require_relative "flagkit/error_code"
-require_relative "flagkit/flag_type"
-require_relative "flagkit/evaluation_reason"
-require_relative "flagkit/flag_state"
-require_relative "flagkit/evaluation_result"
-require_relative "flagkit/evaluation_context"
+
+# Error module (must be loaded first as other modules depend on it)
+require_relative "flagkit/error/error_code"
+require_relative "flagkit/error/flagkit_error"
+
+# Types module
+require_relative "flagkit/types/flag_type"
+require_relative "flagkit/types/evaluation_reason"
+require_relative "flagkit/types/flag_state"
+require_relative "flagkit/types/evaluation_context"
+require_relative "flagkit/types/evaluation_result"
+
+# HTTP module
+require_relative "flagkit/http/circuit_breaker"
+require_relative "flagkit/http/http_client"
+
+# Core module
+require_relative "flagkit/core/cache"
+require_relative "flagkit/core/polling_manager"
+require_relative "flagkit/core/event_queue"
+
+# Main components
 require_relative "flagkit/options"
-require_relative "flagkit/cache"
-require_relative "flagkit/circuit_breaker"
-require_relative "flagkit/http_client"
-require_relative "flagkit/polling_manager"
-require_relative "flagkit/event_queue"
 require_relative "flagkit/client"
 
 # FlagKit Ruby SDK
