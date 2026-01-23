@@ -64,7 +64,19 @@ client = FlagKit.initialize(
   timeout: 10,                                  # Request timeout in seconds
   retry_attempts: 3,                            # Number of retry attempts
   circuit_breaker_threshold: 5,                 # Failures before circuit opens
-  circuit_breaker_reset_timeout: 30             # Seconds before half-open
+  circuit_breaker_reset_timeout: 30,            # Seconds before half-open
+  local_port: nil                               # Local dev server port (uses http://localhost:{port}/api/v1)
+)
+```
+
+## Local Development
+
+For local development, use the `local_port` option to connect to a local FlagKit server:
+
+```ruby
+client = FlagKit.initialize(
+  'sdk_your_api_key',
+  local_port: 8200  # Uses http://localhost:8200/api/v1
 )
 ```
 
