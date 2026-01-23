@@ -1,0 +1,48 @@
+# Bundler
+/.bundle/
+vendor/bundle/
+Gemfile.lock
+
+# Gem build
+*.gem
+pkg/
+
+# RVM/rbenv/chruby
+.ruby-version
+.ruby-gemset
+.rvmrc
+
+# Test coverage
+coverage/
+.rspec_status
+
+# Documentation
+doc/
+.yardoc/
+_yardoc/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+log/
+*.log
+
+# Byebug
+.byebug_history
+
+# Spring
+.spring/
