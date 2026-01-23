@@ -27,7 +27,8 @@ module FlagKit
                 :circuit_breaker_reset_timeout,
                 :bootstrap,
                 :logger,
-                :storage
+                :storage,
+                :local_port
 
     # @param api_key [String] The API key
     # @param polling_interval [Integer] Polling interval in seconds
@@ -44,6 +45,7 @@ module FlagKit
     # @param bootstrap [Hash, nil] Bootstrap data
     # @param logger [Object, nil] Logger instance
     # @param storage [Object, nil] Storage adapter
+    # @param local_port [Integer, nil] Local development server port (uses http://localhost:{port}/api/v1)
     def initialize(
       api_key:,
       polling_interval: DEFAULT_POLLING_INTERVAL,
@@ -59,7 +61,8 @@ module FlagKit
       circuit_breaker_reset_timeout: DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT,
       bootstrap: nil,
       logger: nil,
-      storage: nil
+      storage: nil,
+      local_port: nil
     )
       @api_key = api_key
       @polling_interval = polling_interval
@@ -76,6 +79,7 @@ module FlagKit
       @bootstrap = bootstrap
       @logger = logger
       @storage = storage
+      @local_port = local_port
     end
 
     # Validates the options.

@@ -15,13 +15,22 @@ module FlagKit
 
       attr_reader :api_key, :timeout, :retry_attempts, :circuit_breaker
 
+      # Returns the base URL for the given local port, or the default production URL.
+      #
+      # @param local_port [Integer, nil] The local port number
+      # @return [String] The base URL
+      def self.get_base_url(local_port)
+        local_port ? "http://localhost:#{local_port}/api/v1" : BASE_URL
+      end
+
       # @param api_key [String] The API key
       # @param timeout [Integer] Request timeout in seconds
       # @param retry_attempts [Integer] Number of retry attempts
       # @param circuit_breaker [CircuitBreaker] The circuit breaker
       # @param logger [Object, nil] Logger instance
-      def initialize(api_key:, timeout:, retry_attempts:, circuit_breaker:, logger: nil)
-        @base_url = BASE_URL
+      # @param local_port [Integer, nil] Local development server port
+      def initialize(api_key:, timeout:, retry_attempts:, circuit_breaker:, logger: nil, local_port: nil)
+        @base_url = self.class.get_base_url(local_port)
         @api_key = api_key
         @timeout = timeout
         @retry_attempts = retry_attempts
