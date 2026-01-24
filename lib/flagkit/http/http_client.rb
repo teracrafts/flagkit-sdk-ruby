@@ -65,7 +65,7 @@ module FlagKit
           conn.options.open_timeout = timeout
           conn.headers["Content-Type"] = "application/json"
           conn.headers["Accept"] = "application/json"
-          conn.headers["Authorization"] = "Bearer #{api_key}"
+          conn.headers["X-API-Key"] = api_key
           conn.headers["User-Agent"] = "FlagKit-Ruby/#{VERSION}"
           conn.adapter Faraday.default_adapter
         end
