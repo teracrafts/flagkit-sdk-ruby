@@ -5,7 +5,8 @@ require "json"
 
 module FlagKit
   module Http
-    # HTTP client with retry logic and circuit breaker integration.
+    # HTTP client with retry logic, circuit breaker integration,
+    # request signing, and key rotation support.
     class HttpClient
       BASE_URL = "https://api.flagkit.dev/api/v1"
       BASE_RETRY_DELAY = 1.0
@@ -13,7 +14,7 @@ module FlagKit
       RETRY_MULTIPLIER = 2.0
       JITTER_FACTOR = 0.1
 
-      attr_reader :api_key, :timeout, :retry_attempts, :circuit_breaker
+      attr_reader :timeout, :retry_attempts, :circuit_breaker
 
       # Returns the base URL for the given local port, or the default production URL.
       #
@@ -23,15 +24,57 @@ module FlagKit
         local_port ? "http://localhost:#{local_port}/api/v1" : BASE_URL
       end
 
+      # Returns the currently active API key.
+      #
+      # @return [String] The current API key
+      def api_key
+        @current_api_key
+      end
+
+      # Returns the key identifier for the current API key.
+      #
+      # @return [String] The key ID (first 8 characters)
+      def key_id
+        Utils::Security.get_key_id(@current_api_key)
+      end
+
+      # Checks if key rotation is currently active.
+      #
+      # @return [Boolean] true if within the key rotation grace period
+      def in_key_rotation?
+        return false unless @key_rotation_timestamp
+
+        elapsed = Time.now - @key_rotation_timestamp
+        elapsed < @key_rotation_grace_period
+      end
+
       # @param api_key [String] The API key
       # @param timeout [Integer] Request timeout in seconds
       # @param retry_attempts [Integer] Number of retry attempts
       # @param circuit_breaker [CircuitBreaker] The circuit breaker
       # @param logger [Object, nil] Logger instance
       # @param local_port [Integer, nil] Local development server port
-      def initialize(api_key:, timeout:, retry_attempts:, circuit_breaker:, logger: nil, local_port: nil)
+      # @param secondary_api_key [String, nil] Secondary API key for rotation
+      # @param key_rotation_grace_period [Integer] Grace period in seconds
+      # @param enable_request_signing [Boolean] Enable HMAC-SHA256 request signing
+      def initialize(
+        api_key:,
+        timeout:,
+        retry_attempts:,
+        circuit_breaker:,
+        logger: nil,
+        local_port: nil,
+        secondary_api_key: nil,
+        key_rotation_grace_period: 300,
+        enable_request_signing: true
+      )
         @base_url = self.class.get_base_url(local_port)
-        @api_key = api_key
+        @primary_api_key = api_key
+        @secondary_api_key = secondary_api_key
+        @current_api_key = api_key
+        @key_rotation_grace_period = key_rotation_grace_period
+        @key_rotation_timestamp = nil
+        @enable_request_signing = enable_request_signing
         @timeout = timeout
         @retry_attempts = retry_attempts
         @circuit_breaker = circuit_breaker
@@ -48,16 +91,44 @@ module FlagKit
         request(:get, path, params: params)
       end
 
-      # Makes a POST request.
+      # Makes a POST request with automatic request signing.
       #
       # @param path [String] The request path
       # @param body [Hash] The request body
       # @return [Hash] The response body
       def post(path, body = {})
-        request(:post, path, body: body)
+        signing_headers = {}
+
+        if @enable_request_signing && !body.empty?
+          body_string = body.to_json
+          sig_data = Utils::Security.create_request_signature(body_string, @current_api_key)
+          signing_headers["X-Signature"] = sig_data[:signature]
+          signing_headers["X-Timestamp"] = sig_data[:timestamp].to_s
+          signing_headers["X-Key-Id"] = sig_data[:key_id]
+        end
+
+        request(:post, path, body: body, extra_headers: signing_headers)
       end
 
       private
+
+      # Rotates to the secondary API key on authentication failure.
+      #
+      # @return [Boolean] true if rotation was performed
+      def rotate_to_secondary_key
+        return false unless @secondary_api_key
+        return false if @current_api_key == @secondary_api_key
+
+        log(:info, "Rotating to secondary API key due to authentication failure")
+        @current_api_key = @secondary_api_key
+        @key_rotation_timestamp = Time.now
+        rebuild_connection
+        true
+      end
+
+      def rebuild_connection
+        @connection = build_connection
+      end
 
       def build_connection
         Faraday.new(url: @base_url) do |conn|
@@ -65,13 +136,13 @@ module FlagKit
           conn.options.open_timeout = timeout
           conn.headers["Content-Type"] = "application/json"
           conn.headers["Accept"] = "application/json"
-          conn.headers["X-API-Key"] = api_key
+          conn.headers["X-API-Key"] = @current_api_key
           conn.headers["User-Agent"] = "FlagKit-Ruby/#{VERSION}"
           conn.adapter Faraday.default_adapter
         end
       end
 
-      def request(method, path, params: nil, body: nil)
+      def request(method, path, params: nil, body: nil, extra_headers: {})
         unless circuit_breaker.allow_request?
           raise FlagKit::Error.new(ErrorCode::CIRCUIT_OPEN, "Circuit breaker is open")
         end
@@ -82,7 +153,7 @@ module FlagKit
         loop do
           attempts += 1
           begin
-            response = execute_request(method, path, params, body)
+            response = execute_request(method, path, params, body, extra_headers)
             circuit_breaker.record_success
             return parse_response(response)
           rescue Faraday::TimeoutError => e
@@ -91,6 +162,16 @@ module FlagKit
             last_error = FlagKit::Error.network_error("Connection failed: #{e.message}", cause: e)
           rescue FlagKit::Error => e
             last_error = e
+
+            # Handle 401 errors with key rotation
+            if e.code == ErrorCode::AUTH_INVALID_KEY && @secondary_api_key
+              if rotate_to_secondary_key
+                log(:debug, "Retrying request with secondary API key")
+                attempts -= 1 # Don't count rotation retry against attempt limit
+                next
+              end
+            end
+
             # Don't retry on non-recoverable errors
             raise e unless e.recoverable?
           rescue StandardError => e
@@ -106,9 +187,10 @@ module FlagKit
         end
       end
 
-      def execute_request(method, path, params, body)
+      def execute_request(method, path, params, body, extra_headers = {})
         @connection.run_request(method, path, body&.to_json, nil) do |req|
           req.params.update(params) if params
+          extra_headers.each { |k, v| req.headers[k] = v }
         end
       end
 

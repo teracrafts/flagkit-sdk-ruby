@@ -1,11 +1,16 @@
 # frozen_string_literal: true
 
+require "openssl"
+require "base64"
+require "json"
+
 module FlagKit
   module Utils
     # Security utilities for FlagKit SDK.
     #
-    # Provides methods for detecting potential PII in data and
-    # validating API key usage in different environments.
+    # Provides methods for detecting potential PII in data,
+    # validating API key usage, request signing with HMAC-SHA256,
+    # and cache encryption with AES-256-GCM.
     module Security
       # Common PII field patterns (case-insensitive)
       PII_PATTERNS = %w[
@@ -116,16 +121,30 @@ module FlagKit
         # @param data [Hash, nil] The data to check
         # @param data_type [String, Symbol] The type of data ("context" or "event")
         # @param logger [Object, nil] Optional logger instance
+        # @param strict_mode [Boolean] When true, raises SecurityError instead of warning
+        # @param has_private_attributes [Boolean] Whether private_attributes are configured
         # @return [void]
+        # @raise [FlagKit::SecurityError] In strict mode when PII detected without private_attributes
         #
         # @example
         #   Security.warn_if_potential_pii({ email: "test@example.com" }, :context, logger)
-        def warn_if_potential_pii(data, data_type, logger = nil)
-          return unless config.warn_on_potential_pii
-          return if data.nil? || logger.nil?
+        def warn_if_potential_pii(data, data_type, logger = nil, strict_mode: false, has_private_attributes: false)
+          return if data.nil?
 
           pii_fields = detect_potential_pii(data)
           return if pii_fields.empty?
+
+          # In strict mode, raise error if PII detected without private_attributes
+          if strict_mode && !has_private_attributes
+            raise FlagKit::SecurityError.new(
+              FlagKit::ErrorCode::SECURITY_PII_DETECTED,
+              "Potential PII detected in #{data_type} data: #{pii_fields.join(', ')}. " \
+              "In strict_pii_mode, you must configure private_attributes for PII fields or remove the data."
+            )
+          end
+
+          return unless config.warn_on_potential_pii
+          return if logger.nil?
 
           advice = case data_type.to_s
                    when "context"
@@ -225,6 +244,103 @@ module FlagKit
         # @return [SecurityConfig] A new default configuration
         def reset_config!
           @config = SecurityConfig.new
+        end
+
+        # Gets the first 8 characters of an API key for identification.
+        # This is safe to expose as it doesn't reveal the full key.
+        #
+        # @param api_key [String] The API key
+        # @return [String] The key identifier (first 8 characters)
+        #
+        # @example
+        #   Security.get_key_id("sdk_abc123xyz") # => "sdk_abc1"
+        def get_key_id(api_key)
+          return "" if api_key.nil?
+
+          api_key.to_s[0, 8]
+        end
+
+        # Generates an HMAC-SHA256 signature.
+        #
+        # @param message [String] The message to sign
+        # @param key [String] The signing key
+        # @return [String] The hex-encoded signature
+        #
+        # @example
+        #   signature = Security.generate_hmac_sha256("message", "secret")
+        def generate_hmac_sha256(message, key)
+          OpenSSL::HMAC.hexdigest("SHA256", key, message)
+        end
+
+        # Creates a request signature for POST request bodies.
+        # Format: timestamp.body
+        #
+        # @param body [String] The request body (JSON string)
+        # @param api_key [String] The API key for signing
+        # @param timestamp [Integer, nil] Optional timestamp in milliseconds
+        # @return [Hash] Hash containing :signature, :timestamp, and :key_id
+        #
+        # @example
+        #   result = Security.create_request_signature('{"key":"value"}', "sdk_abc123")
+        #   # => { signature: "abc123...", timestamp: 1234567890, key_id: "sdk_abc1" }
+        def create_request_signature(body, api_key, timestamp: nil)
+          ts = timestamp || (Time.now.to_f * 1000).to_i
+          message = "#{ts}.#{body}"
+          signature = generate_hmac_sha256(message, api_key)
+
+          {
+            signature: signature,
+            timestamp: ts,
+            key_id: get_key_id(api_key)
+          }
+        end
+
+        # Signs a payload with HMAC-SHA256.
+        #
+        # @param data [Object] The data to sign (will be JSON encoded)
+        # @param api_key [String] The API key for signing
+        # @param timestamp [Integer, nil] Optional timestamp in milliseconds
+        # @return [Hash] Signed payload with :data, :signature, :timestamp, :key_id
+        #
+        # @example
+        #   signed = Security.sign_payload({ events: [] }, "sdk_abc123")
+        def sign_payload(data, api_key, timestamp: nil)
+          ts = timestamp || (Time.now.to_f * 1000).to_i
+          payload = JSON.generate(data)
+          message = "#{ts}.#{payload}"
+          signature = generate_hmac_sha256(message, api_key)
+
+          {
+            data: data,
+            signature: signature,
+            timestamp: ts,
+            key_id: get_key_id(api_key)
+          }
+        end
+
+        # Verifies a signed payload.
+        #
+        # @param signed_payload [Hash] The signed payload to verify
+        # @param api_key [String] The API key for verification
+        # @param max_age_ms [Integer] Maximum age in milliseconds (default: 5 minutes)
+        # @return [Boolean] true if the signature is valid
+        #
+        # @example
+        #   Security.verify_signed_payload(signed, "sdk_abc123")
+        def verify_signed_payload(signed_payload, api_key, max_age_ms: 300_000)
+          # Check timestamp age
+          age = (Time.now.to_f * 1000).to_i - signed_payload[:timestamp]
+          return false if age > max_age_ms || age.negative?
+
+          # Verify key ID matches
+          return false if signed_payload[:key_id] != get_key_id(api_key)
+
+          # Verify signature
+          payload = JSON.generate(signed_payload[:data])
+          message = "#{signed_payload[:timestamp]}.#{payload}"
+          expected_signature = generate_hmac_sha256(message, api_key)
+
+          signed_payload[:signature] == expected_signature
         end
 
         private

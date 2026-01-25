@@ -22,6 +22,7 @@ require_relative "flagkit/http/http_client"
 
 # Core module
 require_relative "flagkit/core/cache"
+require_relative "flagkit/core/encrypted_cache"
 require_relative "flagkit/core/polling_manager"
 require_relative "flagkit/core/event_queue"
 

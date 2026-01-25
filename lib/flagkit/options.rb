@@ -12,6 +12,7 @@ module FlagKit
     DEFAULT_RETRY_ATTEMPTS = 3
     DEFAULT_CIRCUIT_BREAKER_THRESHOLD = 5
     DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT = 30
+    DEFAULT_KEY_ROTATION_GRACE_PERIOD = 300
 
     attr_reader :api_key,
                 :polling_interval,
@@ -28,7 +29,12 @@ module FlagKit
                 :bootstrap,
                 :logger,
                 :storage,
-                :local_port
+                :local_port,
+                :secondary_api_key,
+                :key_rotation_grace_period,
+                :strict_pii_mode,
+                :enable_request_signing,
+                :encrypt_cache
 
     # @param api_key [String] The API key
     # @param polling_interval [Integer] Polling interval in seconds
@@ -46,6 +52,11 @@ module FlagKit
     # @param logger [Object, nil] Logger instance
     # @param storage [Object, nil] Storage adapter
     # @param local_port [Integer, nil] Local development server port (uses http://localhost:{port}/api/v1)
+    # @param secondary_api_key [String, nil] Secondary API key for key rotation
+    # @param key_rotation_grace_period [Integer] Grace period in seconds during key rotation
+    # @param strict_pii_mode [Boolean] Raise SecurityError instead of warning when PII detected
+    # @param enable_request_signing [Boolean] Enable HMAC-SHA256 request signing for POST requests
+    # @param encrypt_cache [Boolean] Enable AES-256-GCM encryption for cached data
     def initialize(
       api_key:,
       polling_interval: DEFAULT_POLLING_INTERVAL,
@@ -62,7 +73,12 @@ module FlagKit
       bootstrap: nil,
       logger: nil,
       storage: nil,
-      local_port: nil
+      local_port: nil,
+      secondary_api_key: nil,
+      key_rotation_grace_period: DEFAULT_KEY_ROTATION_GRACE_PERIOD,
+      strict_pii_mode: false,
+      enable_request_signing: true,
+      encrypt_cache: false
     )
       @api_key = api_key
       @polling_interval = polling_interval
@@ -80,17 +96,37 @@ module FlagKit
       @logger = logger
       @storage = storage
       @local_port = local_port
+      @secondary_api_key = secondary_api_key
+      @key_rotation_grace_period = key_rotation_grace_period
+      @strict_pii_mode = strict_pii_mode
+      @enable_request_signing = enable_request_signing
+      @encrypt_cache = encrypt_cache
     end
 
     # Validates the options.
     #
     # @raise [Error] If validation fails
+    # @raise [SecurityError] If local_port is used in production
     def validate!
       validate_api_key!
       validate_positive_integers!
+      validate_local_port_restriction!
     end
 
     private
+
+    def validate_local_port_restriction!
+      return unless local_port
+
+      env = ENV.fetch("RACK_ENV", ENV.fetch("RAILS_ENV", nil))
+      return unless env == "production"
+
+      raise SecurityError.new(
+        ErrorCode::SECURITY_LOCAL_PORT_IN_PRODUCTION,
+        "local_port cannot be used in production environment. " \
+        "This is a security risk as it bypasses HTTPS and may expose traffic to interception."
+      )
+    end
 
     def validate_api_key!
       raise Error.config_error(ErrorCode::CONFIG_INVALID_API_KEY, "API key is required") if api_key.nil? || api_key.empty?

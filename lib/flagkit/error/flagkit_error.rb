@@ -60,10 +60,19 @@ module FlagKit
         def config_error(code, message)
           new(code, message)
         end
+
+        # Creates a security error.
+        def security_error(code, message)
+          new(code, message)
+        end
       end
     end
   end
 
   # Alias for backward compatibility - use Error as the class name
   Error = Error::FlagKitError
+
+  # SecurityError for strict PII mode and other security violations
+  class SecurityError < Error
+  end
 end

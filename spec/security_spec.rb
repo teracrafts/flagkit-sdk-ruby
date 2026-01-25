@@ -4,6 +4,7 @@ require "spec_helper"
 
 RSpec.describe FlagKit::Utils::Security do
   let(:security) { described_class }
+  let(:test_api_key) { "sdk_test123456789abcdef" }
 
   # Reset configuration after each test
   after do
@@ -384,6 +385,32 @@ RSpec.describe FlagKit::Utils::Security do
       # Should not raise
       expect { security.warn_if_potential_pii(data, :event, basic_logger) }.not_to raise_error
     end
+
+    context "with strict_pii_mode" do
+      it "raises SecurityError when PII detected without private_attributes" do
+        data = { email: "test@example.com" }
+
+        expect {
+          security.warn_if_potential_pii(data, :context, mock_logger, strict_mode: true, has_private_attributes: false)
+        }.to raise_error(FlagKit::SecurityError, /Potential PII detected/)
+      end
+
+      it "does not raise when has_private_attributes is true" do
+        data = { email: "test@example.com" }
+
+        expect {
+          security.warn_if_potential_pii(data, :context, mock_logger, strict_mode: true, has_private_attributes: true)
+        }.not_to raise_error
+      end
+
+      it "does not raise when no PII is detected" do
+        data = { user_id: "user-123" }
+
+        expect {
+          security.warn_if_potential_pii(data, :context, mock_logger, strict_mode: true, has_private_attributes: false)
+        }.not_to raise_error
+      end
+    end
   end
 
   describe ".server_key?" do
@@ -686,6 +713,458 @@ RSpec.describe FlagKit::Utils::SecurityConfig do
       config = described_class.new
 
       expect(config.warn_on_potential_pii).to be true
+    end
+  end
+end
+
+RSpec.describe FlagKit::Utils::Security, "HMAC-SHA256 Request Signing" do
+  let(:security) { described_class }
+  let(:test_api_key) { "sdk_test123456789abcdef" }
+
+  describe ".get_key_id" do
+    it "returns first 8 characters of API key" do
+      expect(security.get_key_id(test_api_key)).to eq("sdk_test")
+    end
+
+    it "handles short keys" do
+      expect(security.get_key_id("sdk")).to eq("sdk")
+    end
+
+    it "handles nil" do
+      expect(security.get_key_id(nil)).to eq("")
+    end
+  end
+
+  describe ".generate_hmac_sha256" do
+    it "generates consistent signatures for same input" do
+      sig1 = security.generate_hmac_sha256("message", "key")
+      sig2 = security.generate_hmac_sha256("message", "key")
+
+      expect(sig1).to eq(sig2)
+    end
+
+    it "generates different signatures for different messages" do
+      sig1 = security.generate_hmac_sha256("message1", "key")
+      sig2 = security.generate_hmac_sha256("message2", "key")
+
+      expect(sig1).not_to eq(sig2)
+    end
+
+    it "generates different signatures for different keys" do
+      sig1 = security.generate_hmac_sha256("message", "key1")
+      sig2 = security.generate_hmac_sha256("message", "key2")
+
+      expect(sig1).not_to eq(sig2)
+    end
+
+    it "returns a 64-character hex string" do
+      sig = security.generate_hmac_sha256("message", "key")
+
+      expect(sig).to match(/^[a-f0-9]{64}$/)
+    end
+  end
+
+  describe ".create_request_signature" do
+    it "returns signature, timestamp, and key_id" do
+      result = security.create_request_signature('{"key":"value"}', test_api_key)
+
+      expect(result).to have_key(:signature)
+      expect(result).to have_key(:timestamp)
+      expect(result).to have_key(:key_id)
+    end
+
+    it "uses provided timestamp" do
+      timestamp = 1234567890000
+      result = security.create_request_signature('{"key":"value"}', test_api_key, timestamp: timestamp)
+
+      expect(result[:timestamp]).to eq(timestamp)
+    end
+
+    it "generates current timestamp if not provided" do
+      before_time = (Time.now.to_f * 1000).to_i
+      result = security.create_request_signature('{"key":"value"}', test_api_key)
+      after_time = (Time.now.to_f * 1000).to_i
+
+      expect(result[:timestamp]).to be >= before_time
+      expect(result[:timestamp]).to be <= after_time
+    end
+
+    it "includes correct key_id" do
+      result = security.create_request_signature('{"key":"value"}', test_api_key)
+
+      expect(result[:key_id]).to eq("sdk_test")
+    end
+  end
+
+  describe ".sign_payload" do
+    it "signs a payload with data, signature, timestamp, and key_id" do
+      data = { events: [{ type: "test" }] }
+      result = security.sign_payload(data, test_api_key)
+
+      expect(result[:data]).to eq(data)
+      expect(result[:signature]).to be_a(String)
+      expect(result[:timestamp]).to be_a(Integer)
+      expect(result[:key_id]).to eq("sdk_test")
+    end
+
+    it "uses provided timestamp" do
+      timestamp = 1234567890000
+      result = security.sign_payload({ test: true }, test_api_key, timestamp: timestamp)
+
+      expect(result[:timestamp]).to eq(timestamp)
+    end
+  end
+
+  describe ".verify_signed_payload" do
+    it "verifies a valid signed payload" do
+      data = { events: [{ type: "test" }] }
+      signed = security.sign_payload(data, test_api_key)
+
+      expect(security.verify_signed_payload(signed, test_api_key)).to be true
+    end
+
+    it "rejects payload with wrong signature" do
+      signed = {
+        data: { test: true },
+        signature: "wrong_signature",
+        timestamp: (Time.now.to_f * 1000).to_i,
+        key_id: "sdk_test"
+      }
+
+      expect(security.verify_signed_payload(signed, test_api_key)).to be false
+    end
+
+    it "rejects payload with wrong key_id" do
+      data = { test: true }
+      signed = security.sign_payload(data, test_api_key)
+      signed[:key_id] = "wrong_id"
+
+      expect(security.verify_signed_payload(signed, test_api_key)).to be false
+    end
+
+    it "rejects expired payload" do
+      data = { test: true }
+      old_timestamp = (Time.now.to_f * 1000).to_i - 400_000 # 400 seconds ago
+      signed = security.sign_payload(data, test_api_key, timestamp: old_timestamp)
+
+      expect(security.verify_signed_payload(signed, test_api_key, max_age_ms: 300_000)).to be false
+    end
+
+    it "rejects payload with future timestamp" do
+      data = { test: true }
+      future_timestamp = (Time.now.to_f * 1000).to_i + 100_000
+      signed = security.sign_payload(data, test_api_key, timestamp: future_timestamp)
+
+      expect(security.verify_signed_payload(signed, test_api_key)).to be false
+    end
+  end
+end
+
+RSpec.describe FlagKit::Options, "Security Options" do
+  describe "local_port production restriction" do
+    around do |example|
+      original_rack_env = ENV["RACK_ENV"]
+      original_rails_env = ENV["RAILS_ENV"]
+      example.run
+      ENV["RACK_ENV"] = original_rack_env
+      ENV["RAILS_ENV"] = original_rails_env
+    end
+
+    it "raises SecurityError when local_port used in RACK_ENV=production" do
+      ENV["RACK_ENV"] = "production"
+      ENV["RAILS_ENV"] = nil
+
+      options = FlagKit::Options.new(api_key: "sdk_test123", local_port: 3000)
+
+      expect { options.validate! }.to raise_error(
+        FlagKit::SecurityError,
+        /local_port cannot be used in production/
+      )
+    end
+
+    it "raises SecurityError when local_port used in RAILS_ENV=production" do
+      ENV["RACK_ENV"] = nil
+      ENV["RAILS_ENV"] = "production"
+
+      options = FlagKit::Options.new(api_key: "sdk_test123", local_port: 3000)
+
+      expect { options.validate! }.to raise_error(
+        FlagKit::SecurityError,
+        /local_port cannot be used in production/
+      )
+    end
+
+    it "allows local_port in development" do
+      ENV["RACK_ENV"] = "development"
+      ENV["RAILS_ENV"] = nil
+
+      options = FlagKit::Options.new(api_key: "sdk_test123", local_port: 3000)
+
+      expect { options.validate! }.not_to raise_error
+    end
+
+    it "allows local_port in test" do
+      ENV["RACK_ENV"] = "test"
+      ENV["RAILS_ENV"] = nil
+
+      options = FlagKit::Options.new(api_key: "sdk_test123", local_port: 3000)
+
+      expect { options.validate! }.not_to raise_error
+    end
+
+    it "allows local_port when env is not set" do
+      ENV["RACK_ENV"] = nil
+      ENV["RAILS_ENV"] = nil
+
+      options = FlagKit::Options.new(api_key: "sdk_test123", local_port: 3000)
+
+      expect { options.validate! }.not_to raise_error
+    end
+  end
+
+  describe "security options" do
+    it "supports secondary_api_key option" do
+      options = FlagKit::Options.new(
+        api_key: "sdk_primary",
+        secondary_api_key: "sdk_secondary"
+      )
+
+      expect(options.secondary_api_key).to eq("sdk_secondary")
+    end
+
+    it "supports key_rotation_grace_period option" do
+      options = FlagKit::Options.new(
+        api_key: "sdk_test123",
+        key_rotation_grace_period: 600
+      )
+
+      expect(options.key_rotation_grace_period).to eq(600)
+    end
+
+    it "defaults key_rotation_grace_period to 300 seconds" do
+      options = FlagKit::Options.new(api_key: "sdk_test123")
+
+      expect(options.key_rotation_grace_period).to eq(300)
+    end
+
+    it "supports strict_pii_mode option" do
+      options = FlagKit::Options.new(
+        api_key: "sdk_test123",
+        strict_pii_mode: true
+      )
+
+      expect(options.strict_pii_mode).to be true
+    end
+
+    it "defaults strict_pii_mode to false" do
+      options = FlagKit::Options.new(api_key: "sdk_test123")
+
+      expect(options.strict_pii_mode).to be false
+    end
+
+    it "supports enable_request_signing option" do
+      options = FlagKit::Options.new(
+        api_key: "sdk_test123",
+        enable_request_signing: false
+      )
+
+      expect(options.enable_request_signing).to be false
+    end
+
+    it "defaults enable_request_signing to true" do
+      options = FlagKit::Options.new(api_key: "sdk_test123")
+
+      expect(options.enable_request_signing).to be true
+    end
+
+    it "supports encrypt_cache option" do
+      options = FlagKit::Options.new(
+        api_key: "sdk_test123",
+        encrypt_cache: true
+      )
+
+      expect(options.encrypt_cache).to be true
+    end
+
+    it "defaults encrypt_cache to false" do
+      options = FlagKit::Options.new(api_key: "sdk_test123")
+
+      expect(options.encrypt_cache).to be false
+    end
+  end
+end
+
+RSpec.describe FlagKit::Core::EncryptedCache do
+  let(:api_key) { "sdk_test123456789abcdef" }
+  let(:cache) { described_class.new(api_key: api_key, ttl: 300) }
+
+  describe "#initialize" do
+    it "creates an encrypted cache" do
+      expect(cache).to be_a(FlagKit::Core::EncryptedCache)
+    end
+
+    it "reports encryption as available" do
+      expect(cache.encryption_available?).to be true
+    end
+  end
+
+  describe "#set and #get" do
+    it "stores and retrieves simple values" do
+      cache.set("key1", "value1")
+
+      expect(cache.get("key1")).to eq("value1")
+    end
+
+    it "stores and retrieves hashes" do
+      data = { "name" => "test", "enabled" => true }
+      cache.set("hash_key", data)
+
+      expect(cache.get("hash_key")).to eq(data)
+    end
+
+    it "stores and retrieves arrays" do
+      data = [1, 2, 3, "four"]
+      cache.set("array_key", data)
+
+      expect(cache.get("array_key")).to eq(data)
+    end
+
+    it "stores and retrieves nested structures" do
+      data = {
+        "user" => { "id" => 123, "name" => "test" },
+        "flags" => [{ "key" => "feature1", "enabled" => true }]
+      }
+      cache.set("nested_key", data)
+
+      expect(cache.get("nested_key")).to eq(data)
+    end
+
+    it "returns nil for non-existent keys" do
+      expect(cache.get("nonexistent")).to be_nil
+    end
+  end
+
+  describe "encryption verification" do
+    it "actually encrypts data (raw cache contains encrypted data)" do
+      cache.set("test_key", "secret_value")
+
+      # Access the internal cache to verify encryption
+      raw_value = cache.instance_variable_get(:@cache).get("test_key")
+
+      # Raw value should be JSON with encryption fields
+      parsed = JSON.parse(raw_value)
+      expect(parsed).to have_key("iv")
+      expect(parsed).to have_key("data")
+      expect(parsed).to have_key("tag")
+      expect(parsed).to have_key("version")
+
+      # The encrypted data should not contain the plaintext
+      expect(raw_value).not_to include("secret_value")
+    end
+
+    it "uses different IVs for each encryption" do
+      cache.set("key1", "same_value")
+      cache.set("key2", "same_value")
+
+      raw1 = cache.instance_variable_get(:@cache).get("key1")
+      raw2 = cache.instance_variable_get(:@cache).get("key2")
+
+      parsed1 = JSON.parse(raw1)
+      parsed2 = JSON.parse(raw2)
+
+      # IVs should be different
+      expect(parsed1["iv"]).not_to eq(parsed2["iv"])
+      # Ciphertext should also be different due to different IVs
+      expect(parsed1["data"]).not_to eq(parsed2["data"])
+    end
+  end
+
+  describe "#has?" do
+    it "returns true for existing keys" do
+      cache.set("existing", "value")
+
+      expect(cache.has?("existing")).to be true
+    end
+
+    it "returns false for non-existent keys" do
+      expect(cache.has?("nonexistent")).to be false
+    end
+  end
+
+  describe "#delete" do
+    it "removes a key from the cache" do
+      cache.set("to_delete", "value")
+      cache.delete("to_delete")
+
+      expect(cache.has?("to_delete")).to be false
+    end
+  end
+
+  describe "#clear" do
+    it "removes all entries" do
+      cache.set("key1", "value1")
+      cache.set("key2", "value2")
+      cache.clear
+
+      expect(cache.size).to eq(0)
+    end
+  end
+
+  describe "#size" do
+    it "returns the number of entries" do
+      cache.set("key1", "value1")
+      cache.set("key2", "value2")
+
+      expect(cache.size).to eq(2)
+    end
+  end
+
+  describe "#keys" do
+    it "returns all keys" do
+      cache.set("key1", "value1")
+      cache.set("key2", "value2")
+
+      expect(cache.keys).to contain_exactly("key1", "key2")
+    end
+  end
+
+  describe "#to_h" do
+    it "returns all decrypted values" do
+      cache.set("key1", "value1")
+      cache.set("key2", { "nested" => true })
+
+      result = cache.to_h
+
+      expect(result["key1"]).to eq("value1")
+      expect(result["key2"]).to eq({ "nested" => true })
+    end
+  end
+
+  describe "#set_all" do
+    it "sets multiple values" do
+      cache.set_all(
+        "key1" => "value1",
+        "key2" => "value2"
+      )
+
+      expect(cache.get("key1")).to eq("value1")
+      expect(cache.get("key2")).to eq("value2")
+    end
+  end
+
+  describe "different API keys produce different encryption" do
+    it "cannot decrypt data encrypted with different key" do
+      cache1 = described_class.new(api_key: "sdk_key1_abcdef123456")
+      cache2 = described_class.new(api_key: "sdk_key2_xyz789012345")
+
+      cache1.set("shared_key", "secret_data")
+
+      # Copy encrypted data to cache2's internal cache
+      raw_encrypted = cache1.instance_variable_get(:@cache).get("shared_key")
+      cache2.instance_variable_get(:@cache).set("shared_key", raw_encrypted)
+
+      # cache2 should fail to decrypt (returns nil due to auth tag mismatch)
+      expect(cache2.get("shared_key")).to be_nil
     end
   end
 end

@@ -24,13 +24,25 @@ module FlagKit
         timeout: options.timeout,
         retry_attempts: options.retry_attempts,
         circuit_breaker: @circuit_breaker,
-        logger: options.logger
+        logger: options.logger,
+        secondary_api_key: options.secondary_api_key,
+        key_rotation_grace_period: options.key_rotation_grace_period,
+        enable_request_signing: options.enable_request_signing
       )
 
-      @cache = Cache.new(
-        ttl: options.cache_ttl,
-        max_size: options.max_cache_size
-      )
+      @cache = if options.encrypt_cache
+                 EncryptedCache.new(
+                   api_key: options.api_key,
+                   ttl: options.cache_ttl,
+                   max_size: options.max_cache_size,
+                   logger: options.logger
+                 )
+               else
+                 Cache.new(
+                   ttl: options.cache_ttl,
+                   max_size: options.max_cache_size
+                 )
+               end
 
       @polling_manager = PollingManager.new(
         interval: options.polling_interval,
