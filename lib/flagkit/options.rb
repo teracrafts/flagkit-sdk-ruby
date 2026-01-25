@@ -13,6 +13,8 @@ module FlagKit
     DEFAULT_CIRCUIT_BREAKER_THRESHOLD = 5
     DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT = 30
     DEFAULT_KEY_ROTATION_GRACE_PERIOD = 300
+    DEFAULT_MAX_PERSISTED_EVENTS = 10_000
+    DEFAULT_PERSISTENCE_FLUSH_INTERVAL = 1000
 
     attr_reader :api_key,
                 :polling_interval,
@@ -34,7 +36,11 @@ module FlagKit
                 :key_rotation_grace_period,
                 :strict_pii_mode,
                 :enable_request_signing,
-                :encrypt_cache
+                :encrypt_cache,
+                :persist_events,
+                :event_storage_path,
+                :max_persisted_events,
+                :persistence_flush_interval
 
     # @param api_key [String] The API key
     # @param polling_interval [Integer] Polling interval in seconds
@@ -57,6 +63,10 @@ module FlagKit
     # @param strict_pii_mode [Boolean] Raise SecurityError instead of warning when PII detected
     # @param enable_request_signing [Boolean] Enable HMAC-SHA256 request signing for POST requests
     # @param encrypt_cache [Boolean] Enable AES-256-GCM encryption for cached data
+    # @param persist_events [Boolean] Enable crash-resilient event persistence
+    # @param event_storage_path [String, nil] Directory for event storage (defaults to OS temp dir)
+    # @param max_persisted_events [Integer] Maximum events to persist
+    # @param persistence_flush_interval [Integer] Milliseconds between disk writes
     def initialize(
       api_key:,
       polling_interval: DEFAULT_POLLING_INTERVAL,
@@ -78,7 +88,11 @@ module FlagKit
       key_rotation_grace_period: DEFAULT_KEY_ROTATION_GRACE_PERIOD,
       strict_pii_mode: false,
       enable_request_signing: true,
-      encrypt_cache: false
+      encrypt_cache: false,
+      persist_events: false,
+      event_storage_path: nil,
+      max_persisted_events: DEFAULT_MAX_PERSISTED_EVENTS,
+      persistence_flush_interval: DEFAULT_PERSISTENCE_FLUSH_INTERVAL
     )
       @api_key = api_key
       @polling_interval = polling_interval
@@ -101,6 +115,10 @@ module FlagKit
       @strict_pii_mode = strict_pii_mode
       @enable_request_signing = enable_request_signing
       @encrypt_cache = encrypt_cache
+      @persist_events = persist_events
+      @event_storage_path = event_storage_path || default_event_storage_path
+      @max_persisted_events = max_persisted_events
+      @persistence_flush_interval = persistence_flush_interval
     end
 
     # Validates the options.
@@ -142,6 +160,11 @@ module FlagKit
       end
 
       raise Error.config_error(ErrorCode::CONFIG_INVALID_CACHE_TTL, "Cache TTL must be positive") if cache_ttl <= 0
+    end
+
+    def default_event_storage_path
+      require "tmpdir"
+      File.join(Dir.tmpdir, "flagkit", "events")
     end
   end
 end
