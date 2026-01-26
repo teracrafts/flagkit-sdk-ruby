@@ -361,59 +361,49 @@ module FlagKit
         # @param api_key [String] The API key for verification
         # @param max_age_ms [Integer] Maximum age in milliseconds (default: 24 hours)
         # @return [Hash] Result hash with :valid (Boolean) and :error (String or nil)
-        #
-        # @example Valid signature
-        #   result = Security.verify_bootstrap_signature(bootstrap, "sdk_abc123")
-        #   # => { valid: true, error: nil }
-        #
-        # @example Invalid signature
-        #   result = Security.verify_bootstrap_signature(invalid_bootstrap, "sdk_abc123")
-        #   # => { valid: false, error: "Invalid signature" }
         def verify_bootstrap_signature(bootstrap, api_key, max_age_ms: 86_400_000)
-          # Normalize keys to symbols
           bootstrap = normalize_keys(bootstrap)
 
-          # Check required fields
-          unless bootstrap[:signature]
-            return { valid: false, error: "Missing signature" }
-          end
+          error = validate_bootstrap_fields(bootstrap) || validate_bootstrap_timestamp(bootstrap, max_age_ms)
+          return { valid: false, error: error } if error
 
-          unless bootstrap[:timestamp]
-            return { valid: false, error: "Missing timestamp" }
-          end
+          verify_bootstrap_hmac(bootstrap, api_key)
+        end
 
-          unless bootstrap[:flags]
-            return { valid: false, error: "Missing flags" }
-          end
+        private
 
-          # Check timestamp age
+        # Validates required bootstrap fields are present.
+        def validate_bootstrap_fields(bootstrap)
+          return "Missing signature" unless bootstrap[:signature]
+          return "Missing timestamp" unless bootstrap[:timestamp]
+          return "Missing flags" unless bootstrap[:flags]
+
+          nil
+        end
+
+        # Validates bootstrap timestamp is within acceptable age range.
+        def validate_bootstrap_timestamp(bootstrap, max_age_ms)
           timestamp = bootstrap[:timestamp].to_i
-          current_time = (Time.now.to_f * 1000).to_i
-          age = current_time - timestamp
+          age = (Time.now.to_f * 1000).to_i - timestamp
 
-          if age > max_age_ms
-            return { valid: false, error: "Bootstrap data expired (age: #{age}ms, max: #{max_age_ms}ms)" }
-          end
+          return "Bootstrap data expired (age: #{age}ms, max: #{max_age_ms}ms)" if age > max_age_ms
+          return "Bootstrap timestamp is in the future" if age.negative?
 
-          if age.negative?
-            return { valid: false, error: "Bootstrap timestamp is in the future" }
-          end
+          nil
+        end
 
-          # Build message for signature verification: timestamp.canonical_flags
+        # Computes and verifies the HMAC signature for bootstrap data.
+        def verify_bootstrap_hmac(bootstrap, api_key)
           canonical_flags = canonicalize_object(bootstrap[:flags])
-          message = "#{timestamp}.#{canonical_flags}"
-          expected_signature = generate_hmac_sha256(message, api_key)
+          message = "#{bootstrap[:timestamp]}.#{canonical_flags}"
+          expected = generate_hmac_sha256(message, api_key)
 
-          # Use constant-time comparison to prevent timing attacks
-          provided_signature = bootstrap[:signature].to_s
-          if secure_compare(expected_signature, provided_signature)
+          if secure_compare(expected, bootstrap[:signature].to_s)
             { valid: true, error: nil }
           else
             { valid: false, error: "Invalid signature" }
           end
         end
-
-        private
 
         # Performs constant-time string comparison to prevent timing attacks.
         #
