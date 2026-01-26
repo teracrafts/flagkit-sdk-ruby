@@ -21,6 +21,8 @@ module FlagKit
     DEFAULT_BOOTSTRAP_VERIFICATION_ENABLED = true
     DEFAULT_BOOTSTRAP_VERIFICATION_MAX_AGE = 86_400_000 # 24 hours in milliseconds
     DEFAULT_BOOTSTRAP_VERIFICATION_ON_FAILURE = "warn"
+    DEFAULT_ERROR_SANITIZATION_ENABLED = true
+    DEFAULT_ERROR_SANITIZATION_PRESERVE_ORIGINAL = false
 
     attr_reader :api_key,
                 :polling_interval,
@@ -52,7 +54,9 @@ module FlagKit
                 :evaluation_jitter_max_ms,
                 :bootstrap_verification_enabled,
                 :bootstrap_verification_max_age,
-                :bootstrap_verification_on_failure
+                :bootstrap_verification_on_failure,
+                :error_sanitization_enabled,
+                :error_sanitization_preserve_original
 
     # @param api_key [String] The API key
     # @param polling_interval [Integer] Polling interval in seconds
@@ -85,6 +89,8 @@ module FlagKit
     # @param bootstrap_verification_enabled [Boolean] Enable HMAC-SHA256 signature verification for bootstrap data
     # @param bootstrap_verification_max_age [Integer] Maximum age in milliseconds for bootstrap data
     # @param bootstrap_verification_on_failure [String] Action on verification failure: 'warn', 'error', or 'ignore'
+    # @param error_sanitization_enabled [Boolean] Enable sanitization of sensitive info from error messages
+    # @param error_sanitization_preserve_original [Boolean] Preserve original message in addition to sanitized
     def initialize(
       api_key:,
       polling_interval: DEFAULT_POLLING_INTERVAL,
@@ -116,7 +122,9 @@ module FlagKit
       evaluation_jitter_max_ms: DEFAULT_EVALUATION_JITTER_MAX_MS,
       bootstrap_verification_enabled: DEFAULT_BOOTSTRAP_VERIFICATION_ENABLED,
       bootstrap_verification_max_age: DEFAULT_BOOTSTRAP_VERIFICATION_MAX_AGE,
-      bootstrap_verification_on_failure: DEFAULT_BOOTSTRAP_VERIFICATION_ON_FAILURE
+      bootstrap_verification_on_failure: DEFAULT_BOOTSTRAP_VERIFICATION_ON_FAILURE,
+      error_sanitization_enabled: DEFAULT_ERROR_SANITIZATION_ENABLED,
+      error_sanitization_preserve_original: DEFAULT_ERROR_SANITIZATION_PRESERVE_ORIGINAL
     )
       @api_key = api_key
       @polling_interval = polling_interval
@@ -149,6 +157,8 @@ module FlagKit
       @bootstrap_verification_enabled = bootstrap_verification_enabled
       @bootstrap_verification_max_age = bootstrap_verification_max_age
       @bootstrap_verification_on_failure = bootstrap_verification_on_failure
+      @error_sanitization_enabled = error_sanitization_enabled
+      @error_sanitization_preserve_original = error_sanitization_preserve_original
     end
 
     # Validates the options.

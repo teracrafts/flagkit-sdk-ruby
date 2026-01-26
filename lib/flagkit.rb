@@ -4,6 +4,7 @@ require_relative "flagkit/version"
 
 # Error module (must be loaded first as other modules depend on it)
 require_relative "flagkit/error/error_code"
+require_relative "flagkit/error/error_sanitizer"
 require_relative "flagkit/error/flagkit_error"
 
 # Utils module

@@ -4,16 +4,35 @@ module FlagKit
   module Error
     # Base exception for all FlagKit SDK errors.
     class FlagKitError < StandardError
-      attr_reader :code, :details
+      attr_reader :code, :details, :original_message
+
+      class << self
+        # @return [Boolean] Whether error sanitization is enabled
+        attr_accessor :sanitization_enabled
+
+        # @return [Boolean] Whether to preserve the original message
+        attr_accessor :preserve_original
+      end
+
+      # Default sanitization settings
+      @sanitization_enabled = true
+      @preserve_original = false
 
       # @param code [String] The error code
       # @param message [String] The error message
       # @param cause [Exception, nil] The underlying cause
-      def initialize(code, message, cause: nil)
+      # @param sanitize [Boolean, nil] Override sanitization setting for this error
+      def initialize(code, message, cause: nil, sanitize: nil)
         @code = code
         @cause = cause
         @details = {}
-        super("[#{code}] #{message}")
+
+        should_sanitize = sanitize.nil? ? self.class.sanitization_enabled : sanitize
+        sanitized_message = FlagKit::ErrorSanitizer.sanitize(message, enabled: should_sanitize)
+
+        @original_message = message if self.class.preserve_original && should_sanitize
+
+        super("[#{code}] #{sanitized_message}")
       end
 
       # @return [Boolean] Whether the error is recoverable
