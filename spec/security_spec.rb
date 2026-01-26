@@ -390,9 +390,14 @@ RSpec.describe FlagKit::Utils::Security do
       it "raises SecurityError when PII detected without private_attributes" do
         data = { email: "test@example.com" }
 
-        expect {
+        error = nil
+        begin
           security.warn_if_potential_pii(data, :context, mock_logger, strict_mode: true, has_private_attributes: false)
-        }.to raise_error(FlagKit::SecurityError, /Potential PII detected/)
+        rescue FlagKit::SecurityError => e
+          error = e
+        end
+        expect(error).not_to be_nil
+        expect(error.message).to include("Potential PII detected")
       end
 
       it "does not raise when has_private_attributes is true" do
@@ -876,10 +881,14 @@ RSpec.describe FlagKit::Options, "Security Options" do
 
       options = FlagKit::Options.new(api_key: "sdk_test123", local_port: 3000)
 
-      expect { options.validate! }.to raise_error(
-        FlagKit::SecurityError,
-        /local_port cannot be used in production/
-      )
+      error = nil
+      begin
+        options.validate!
+      rescue FlagKit::SecurityError => e
+        error = e
+      end
+      expect(error).not_to be_nil
+      expect(error.message).to include("local_port cannot be used in production")
     end
 
     it "raises SecurityError when local_port used in RAILS_ENV=production" do
@@ -888,10 +897,14 @@ RSpec.describe FlagKit::Options, "Security Options" do
 
       options = FlagKit::Options.new(api_key: "sdk_test123", local_port: 3000)
 
-      expect { options.validate! }.to raise_error(
-        FlagKit::SecurityError,
-        /local_port cannot be used in production/
-      )
+      error = nil
+      begin
+        options.validate!
+      rescue FlagKit::SecurityError => e
+        error = e
+      end
+      expect(error).not_to be_nil
+      expect(error.message).to include("local_port cannot be used in production")
     end
 
     it "allows local_port in development" do

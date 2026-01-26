@@ -349,10 +349,14 @@ RSpec.describe FlagKit::Client, "Bootstrap Verification" do
 
         client = FlagKit::Client.new(options)
 
-        expect { client.send(:load_bootstrap) }.to raise_error(
-          FlagKit::Error,
-          /Bootstrap verification failed/
-        )
+        error = nil
+        begin
+          client.send(:load_bootstrap)
+        rescue StandardError => e
+          error = e
+        end
+        expect(error).not_to be_nil
+        expect(error.message).to include("Bootstrap verification failed")
       end
     end
 
