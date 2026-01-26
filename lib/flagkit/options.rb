@@ -15,6 +15,9 @@ module FlagKit
     DEFAULT_KEY_ROTATION_GRACE_PERIOD = 300
     DEFAULT_MAX_PERSISTED_EVENTS = 10_000
     DEFAULT_PERSISTENCE_FLUSH_INTERVAL = 1000
+    DEFAULT_EVALUATION_JITTER_ENABLED = false
+    DEFAULT_EVALUATION_JITTER_MIN_MS = 5
+    DEFAULT_EVALUATION_JITTER_MAX_MS = 15
 
     attr_reader :api_key,
                 :polling_interval,
@@ -40,7 +43,10 @@ module FlagKit
                 :persist_events,
                 :event_storage_path,
                 :max_persisted_events,
-                :persistence_flush_interval
+                :persistence_flush_interval,
+                :evaluation_jitter_enabled,
+                :evaluation_jitter_min_ms,
+                :evaluation_jitter_max_ms
 
     # @param api_key [String] The API key
     # @param polling_interval [Integer] Polling interval in seconds
@@ -67,6 +73,9 @@ module FlagKit
     # @param event_storage_path [String, nil] Directory for event storage (defaults to OS temp dir)
     # @param max_persisted_events [Integer] Maximum events to persist
     # @param persistence_flush_interval [Integer] Milliseconds between disk writes
+    # @param evaluation_jitter_enabled [Boolean] Enable timing jitter for cache timing attack protection
+    # @param evaluation_jitter_min_ms [Integer] Minimum jitter delay in milliseconds
+    # @param evaluation_jitter_max_ms [Integer] Maximum jitter delay in milliseconds
     def initialize(
       api_key:,
       polling_interval: DEFAULT_POLLING_INTERVAL,
@@ -92,7 +101,10 @@ module FlagKit
       persist_events: false,
       event_storage_path: nil,
       max_persisted_events: DEFAULT_MAX_PERSISTED_EVENTS,
-      persistence_flush_interval: DEFAULT_PERSISTENCE_FLUSH_INTERVAL
+      persistence_flush_interval: DEFAULT_PERSISTENCE_FLUSH_INTERVAL,
+      evaluation_jitter_enabled: DEFAULT_EVALUATION_JITTER_ENABLED,
+      evaluation_jitter_min_ms: DEFAULT_EVALUATION_JITTER_MIN_MS,
+      evaluation_jitter_max_ms: DEFAULT_EVALUATION_JITTER_MAX_MS
     )
       @api_key = api_key
       @polling_interval = polling_interval
@@ -119,6 +131,9 @@ module FlagKit
       @event_storage_path = event_storage_path || default_event_storage_path
       @max_persisted_events = max_persisted_events
       @persistence_flush_interval = persistence_flush_interval
+      @evaluation_jitter_enabled = evaluation_jitter_enabled
+      @evaluation_jitter_min_ms = evaluation_jitter_min_ms
+      @evaluation_jitter_max_ms = evaluation_jitter_max_ms
     end
 
     # Validates the options.

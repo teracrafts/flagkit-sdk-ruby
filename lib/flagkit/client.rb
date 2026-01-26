@@ -125,6 +125,7 @@ module FlagKit
     # @param context [EvaluationContext, nil] Optional context override
     # @return [EvaluationResult]
     def evaluate(key, default_value, context: nil)
+      apply_evaluation_jitter
       effective_context = merge_context(context)
 
       # Check cache first
@@ -315,6 +316,15 @@ module FlagKit
       return unless options.logger
 
       options.logger.send(level, "[FlagKit::Client] #{message}")
+    end
+
+    # Applies random jitter delay to mitigate cache timing attacks.
+    # This makes it harder for attackers to infer flag values based on response timing.
+    def apply_evaluation_jitter
+      return unless options.evaluation_jitter_enabled
+
+      jitter_ms = rand(options.evaluation_jitter_min_ms..options.evaluation_jitter_max_ms)
+      sleep(jitter_ms / 1000.0)
     end
   end
 end
