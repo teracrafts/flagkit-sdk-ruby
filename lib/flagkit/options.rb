@@ -18,6 +18,9 @@ module FlagKit
     DEFAULT_EVALUATION_JITTER_ENABLED = false
     DEFAULT_EVALUATION_JITTER_MIN_MS = 5
     DEFAULT_EVALUATION_JITTER_MAX_MS = 15
+    DEFAULT_BOOTSTRAP_VERIFICATION_ENABLED = true
+    DEFAULT_BOOTSTRAP_VERIFICATION_MAX_AGE = 86_400_000 # 24 hours in milliseconds
+    DEFAULT_BOOTSTRAP_VERIFICATION_ON_FAILURE = "warn"
 
     attr_reader :api_key,
                 :polling_interval,
@@ -46,7 +49,10 @@ module FlagKit
                 :persistence_flush_interval,
                 :evaluation_jitter_enabled,
                 :evaluation_jitter_min_ms,
-                :evaluation_jitter_max_ms
+                :evaluation_jitter_max_ms,
+                :bootstrap_verification_enabled,
+                :bootstrap_verification_max_age,
+                :bootstrap_verification_on_failure
 
     # @param api_key [String] The API key
     # @param polling_interval [Integer] Polling interval in seconds
@@ -76,6 +82,9 @@ module FlagKit
     # @param evaluation_jitter_enabled [Boolean] Enable timing jitter for cache timing attack protection
     # @param evaluation_jitter_min_ms [Integer] Minimum jitter delay in milliseconds
     # @param evaluation_jitter_max_ms [Integer] Maximum jitter delay in milliseconds
+    # @param bootstrap_verification_enabled [Boolean] Enable HMAC-SHA256 signature verification for bootstrap data
+    # @param bootstrap_verification_max_age [Integer] Maximum age in milliseconds for bootstrap data
+    # @param bootstrap_verification_on_failure [String] Action on verification failure: 'warn', 'error', or 'ignore'
     def initialize(
       api_key:,
       polling_interval: DEFAULT_POLLING_INTERVAL,
@@ -104,7 +113,10 @@ module FlagKit
       persistence_flush_interval: DEFAULT_PERSISTENCE_FLUSH_INTERVAL,
       evaluation_jitter_enabled: DEFAULT_EVALUATION_JITTER_ENABLED,
       evaluation_jitter_min_ms: DEFAULT_EVALUATION_JITTER_MIN_MS,
-      evaluation_jitter_max_ms: DEFAULT_EVALUATION_JITTER_MAX_MS
+      evaluation_jitter_max_ms: DEFAULT_EVALUATION_JITTER_MAX_MS,
+      bootstrap_verification_enabled: DEFAULT_BOOTSTRAP_VERIFICATION_ENABLED,
+      bootstrap_verification_max_age: DEFAULT_BOOTSTRAP_VERIFICATION_MAX_AGE,
+      bootstrap_verification_on_failure: DEFAULT_BOOTSTRAP_VERIFICATION_ON_FAILURE
     )
       @api_key = api_key
       @polling_interval = polling_interval
@@ -134,6 +146,9 @@ module FlagKit
       @evaluation_jitter_enabled = evaluation_jitter_enabled
       @evaluation_jitter_min_ms = evaluation_jitter_min_ms
       @evaluation_jitter_max_ms = evaluation_jitter_max_ms
+      @bootstrap_verification_enabled = bootstrap_verification_enabled
+      @bootstrap_verification_max_age = bootstrap_verification_max_age
+      @bootstrap_verification_on_failure = bootstrap_verification_on_failure
     end
 
     # Validates the options.

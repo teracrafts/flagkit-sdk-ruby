@@ -343,7 +343,124 @@ module FlagKit
           signed_payload[:signature] == expected_signature
         end
 
+        # Canonicalizes an object by sorting keys recursively.
+        # This ensures consistent JSON output for signature verification.
+        #
+        # @param obj [Object] The object to canonicalize
+        # @return [String] Canonical JSON string representation
+        #
+        # @example
+        #   Security.canonicalize_object({ b: 2, a: 1 }) # => '{"a":1,"b":2}'
+        def canonicalize_object(obj)
+          JSON.generate(deep_sort_keys(obj))
+        end
+
+        # Verifies an HMAC-SHA256 signature for bootstrap data.
+        #
+        # @param bootstrap [Hash] The bootstrap data with :flags, :signature, :timestamp
+        # @param api_key [String] The API key for verification
+        # @param max_age_ms [Integer] Maximum age in milliseconds (default: 24 hours)
+        # @return [Hash] Result hash with :valid (Boolean) and :error (String or nil)
+        #
+        # @example Valid signature
+        #   result = Security.verify_bootstrap_signature(bootstrap, "sdk_abc123")
+        #   # => { valid: true, error: nil }
+        #
+        # @example Invalid signature
+        #   result = Security.verify_bootstrap_signature(invalid_bootstrap, "sdk_abc123")
+        #   # => { valid: false, error: "Invalid signature" }
+        def verify_bootstrap_signature(bootstrap, api_key, max_age_ms: 86_400_000)
+          # Normalize keys to symbols
+          bootstrap = normalize_keys(bootstrap)
+
+          # Check required fields
+          unless bootstrap[:signature]
+            return { valid: false, error: "Missing signature" }
+          end
+
+          unless bootstrap[:timestamp]
+            return { valid: false, error: "Missing timestamp" }
+          end
+
+          unless bootstrap[:flags]
+            return { valid: false, error: "Missing flags" }
+          end
+
+          # Check timestamp age
+          timestamp = bootstrap[:timestamp].to_i
+          current_time = (Time.now.to_f * 1000).to_i
+          age = current_time - timestamp
+
+          if age > max_age_ms
+            return { valid: false, error: "Bootstrap data expired (age: #{age}ms, max: #{max_age_ms}ms)" }
+          end
+
+          if age.negative?
+            return { valid: false, error: "Bootstrap timestamp is in the future" }
+          end
+
+          # Build message for signature verification: timestamp.canonical_flags
+          canonical_flags = canonicalize_object(bootstrap[:flags])
+          message = "#{timestamp}.#{canonical_flags}"
+          expected_signature = generate_hmac_sha256(message, api_key)
+
+          # Use constant-time comparison to prevent timing attacks
+          provided_signature = bootstrap[:signature].to_s
+          if secure_compare(expected_signature, provided_signature)
+            { valid: true, error: nil }
+          else
+            { valid: false, error: "Invalid signature" }
+          end
+        end
+
         private
+
+        # Performs constant-time string comparison to prevent timing attacks.
+        #
+        # @param a [String] First string
+        # @param b [String] Second string
+        # @return [Boolean] true if strings are equal
+        def secure_compare(expected, actual)
+          return false unless expected.bytesize == actual.bytesize
+
+          # Use OpenSSL's fixed_length_secure_compare for constant-time comparison
+          OpenSSL.fixed_length_secure_compare(expected, actual)
+        rescue NoMethodError
+          # Fallback for older Ruby versions without fixed_length_secure_compare
+          # This is a constant-time comparison implementation
+          l = expected.unpack("C*")
+          r = actual.unpack("C*")
+          result = 0
+          l.zip(r) { |x, y| result |= x ^ y }
+          result.zero?
+        end
+
+        # Recursively sorts hash keys for canonical representation.
+        #
+        # @param obj [Object] The object to process
+        # @return [Object] Object with sorted keys
+        def deep_sort_keys(obj)
+          case obj
+          when Hash
+            obj.keys.sort_by(&:to_s).each_with_object({}) do |key, sorted|
+              sorted[key] = deep_sort_keys(obj[key])
+            end
+          when Array
+            obj.map { |item| deep_sort_keys(item) }
+          else
+            obj
+          end
+        end
+
+        # Normalizes hash keys to symbols.
+        #
+        # @param hash [Hash] The hash to normalize
+        # @return [Hash] Hash with symbol keys
+        def normalize_keys(hash)
+          return hash unless hash.is_a?(Hash)
+
+          hash.transform_keys { |key| key.to_sym rescue key }
+        end
 
         # Checks if we're in a browser-like environment.
         #

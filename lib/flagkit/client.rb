@@ -245,10 +245,66 @@ module FlagKit
     def load_bootstrap
       return unless options.bootstrap.is_a?(Hash)
 
-      flags = options.bootstrap["flags"] || options.bootstrap[:flags] || []
+      bootstrap = options.bootstrap
+      flags = extract_bootstrap_flags(bootstrap)
+      return if flags.nil?
+
       flags.each do |flag_data|
         flag = FlagState.from_hash(flag_data)
         cache_flag(flag.key, flag)
+      end
+    end
+
+    # Extracts flags from bootstrap data, verifying signature if present.
+    #
+    # @param bootstrap [Hash] The bootstrap data
+    # @return [Array, nil] The flags array, or nil if verification failed
+    def extract_bootstrap_flags(bootstrap)
+      # Check if this is new format (has :flags key) or legacy format (direct hash)
+      has_flags_key = bootstrap.key?("flags") || bootstrap.key?(:flags)
+      has_signature = bootstrap.key?("signature") || bootstrap.key?(:signature)
+
+      # Legacy format: bootstrap is just flags directly
+      unless has_flags_key
+        return bootstrap.is_a?(Array) ? bootstrap : []
+      end
+
+      flags = bootstrap["flags"] || bootstrap[:flags] || []
+
+      # If new format with signature, verify it
+      if has_signature && options.bootstrap_verification_enabled
+        result = Utils::Security.verify_bootstrap_signature(
+          bootstrap,
+          options.api_key,
+          max_age_ms: options.bootstrap_verification_max_age
+        )
+
+        unless result[:valid]
+          handle_bootstrap_verification_failure(result[:error])
+          return nil if options.bootstrap_verification_on_failure == "error"
+        end
+      end
+
+      flags
+    end
+
+    # Handles bootstrap verification failure based on on_failure option.
+    #
+    # @param error_message [String] The error message
+    # @raise [Error] If on_failure is "error"
+    def handle_bootstrap_verification_failure(error_message)
+      case options.bootstrap_verification_on_failure
+      when "error"
+        raise Error.config_error(
+          ErrorCode::CONFIG_INVALID_BOOTSTRAP,
+          "Bootstrap verification failed: #{error_message}"
+        )
+      when "warn"
+        log(:warn, "Bootstrap verification failed: #{error_message}. Using bootstrap data anyway.")
+      when "ignore"
+        # Silently ignore
+      else
+        log(:warn, "Bootstrap verification failed: #{error_message}. Using bootstrap data anyway.")
       end
     end
 
