@@ -135,6 +135,40 @@ module FlagKit
       evaluate(key, default_value, context: context).json_value || default_value
     end
 
+    # Checks if a flag exists in the cache.
+    #
+    # @param key [String] The flag key
+    # @return [Boolean]
+    def has_flag?(key)
+      return false unless options.cache_enabled
+
+      @cache.has?(key)
+    end
+
+    # Returns all cached flag keys.
+    #
+    # @return [Array<String>]
+    def get_all_flag_keys
+      return [] unless options.cache_enabled
+
+      @cache.keys
+    end
+
+    # Evaluates all cached flags and returns results.
+    #
+    # @param context [EvaluationContext, nil] Optional context override
+    # @return [Hash<String, EvaluationResult>]
+    def evaluate_all(context: nil)
+      return {} unless options.cache_enabled
+
+      results = {}
+      @cache.keys.each do |key|
+        cached = @cache.get(key)
+        results[key] = build_result(key, cached, EvaluationReason::CACHED) if cached
+      end
+      results
+    end
+
     # Tracks an analytics event.
     #
     # @param event_type [String] The event type
