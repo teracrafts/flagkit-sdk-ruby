@@ -5,6 +5,36 @@ require "json"
 
 module FlagKit
   module Http
+    # Usage metrics extracted from response headers.
+    #
+    # Contains information about API usage limits and subscription status.
+    class UsageMetrics
+      # @return [Float, nil] Percentage of API call limit used this period (0-150+)
+      attr_reader :api_usage_percent
+
+      # @return [Float, nil] Percentage of evaluation limit used (0-150+)
+      attr_reader :evaluation_usage_percent
+
+      # @return [Boolean] Whether approaching rate limit threshold
+      attr_reader :rate_limit_warning
+
+      # @return [String, nil] Current subscription status: active, trial, past_due, suspended, cancelled
+      attr_reader :subscription_status
+
+      VALID_SUBSCRIPTION_STATUSES = %w[active trial past_due suspended cancelled].freeze
+
+      # @param api_usage_percent [Float, nil] API usage percentage
+      # @param evaluation_usage_percent [Float, nil] Evaluation usage percentage
+      # @param rate_limit_warning [Boolean] Rate limit warning flag
+      # @param subscription_status [String, nil] Subscription status
+      def initialize(api_usage_percent: nil, evaluation_usage_percent: nil, rate_limit_warning: false, subscription_status: nil)
+        @api_usage_percent = api_usage_percent
+        @evaluation_usage_percent = evaluation_usage_percent
+        @rate_limit_warning = rate_limit_warning
+        @subscription_status = subscription_status if subscription_status.nil? || VALID_SUBSCRIPTION_STATUSES.include?(subscription_status)
+      end
+    end
+
     # HTTP client with retry logic, circuit breaker integration,
     # request signing, and key rotation support.
     class HttpClient
@@ -57,6 +87,7 @@ module FlagKit
       # @param secondary_api_key [String, nil] Secondary API key for rotation
       # @param key_rotation_grace_period [Integer] Grace period in seconds
       # @param enable_request_signing [Boolean] Enable HMAC-SHA256 request signing
+      # @param on_usage_update [Proc, nil] Callback for usage metrics updates
       def initialize(
         api_key:,
         timeout:,
@@ -66,7 +97,8 @@ module FlagKit
         local_port: nil,
         secondary_api_key: nil,
         key_rotation_grace_period: 300,
-        enable_request_signing: true
+        enable_request_signing: true,
+        on_usage_update: nil
       )
         @base_url = self.class.get_base_url(local_port)
         @primary_api_key = api_key
@@ -79,6 +111,7 @@ module FlagKit
         @retry_attempts = retry_attempts
         @circuit_breaker = circuit_breaker
         @logger = logger
+        @on_usage_update = on_usage_update
         @connection = build_connection
       end
 
@@ -195,6 +228,12 @@ module FlagKit
       end
 
       def parse_response(response)
+        # Extract and process usage metrics from headers
+        usage_metrics = extract_usage_metrics(response.headers)
+        if usage_metrics && @on_usage_update
+          @on_usage_update.call(usage_metrics)
+        end
+
         case response.status
         when 200..299
           return {} if response.body.nil? || response.body.empty?
@@ -213,6 +252,42 @@ module FlagKit
         else
           raise FlagKit::Error.network_error("Unexpected response status: #{response.status}")
         end
+      end
+
+      # Extracts usage metrics from response headers.
+      #
+      # @param headers [Hash] Response headers
+      # @return [UsageMetrics, nil] Usage metrics if any usage headers present
+      def extract_usage_metrics(headers)
+        api_usage = headers["x-api-usage-percent"]
+        eval_usage = headers["x-evaluation-usage-percent"]
+        rate_limit_warning = headers["x-rate-limit-warning"]
+        subscription_status = headers["x-subscription-status"]
+
+        # Return nil if no usage headers present
+        return nil unless api_usage || eval_usage || rate_limit_warning || subscription_status
+
+        api_usage_percent = api_usage ? (Float(api_usage) rescue nil) : nil
+        evaluation_usage_percent = eval_usage ? (Float(eval_usage) rescue nil) : nil
+        warning_flag = rate_limit_warning == "true"
+
+        # Log warnings for high usage
+        if api_usage_percent && api_usage_percent >= 80
+          log(:warn, "API usage at #{api_usage_percent}%")
+        end
+        if evaluation_usage_percent && evaluation_usage_percent >= 80
+          log(:warn, "Evaluation usage at #{evaluation_usage_percent}%")
+        end
+        if subscription_status == "suspended"
+          log(:error, "Subscription suspended - service degraded")
+        end
+
+        UsageMetrics.new(
+          api_usage_percent: api_usage_percent,
+          evaluation_usage_percent: evaluation_usage_percent,
+          rate_limit_warning: warning_flag,
+          subscription_status: subscription_status
+        )
       end
 
       def calculate_backoff(attempt)
