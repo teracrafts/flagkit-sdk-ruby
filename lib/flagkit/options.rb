@@ -56,7 +56,10 @@ module FlagKit
                 :bootstrap_verification_max_age,
                 :bootstrap_verification_on_failure,
                 :error_sanitization_enabled,
-                :error_sanitization_preserve_original
+                :error_sanitization_preserve_original,
+                :on_usage_update,
+                :on_subscription_error,
+                :on_connection_limit_error
 
     # @param api_key [String] The API key
     # @param polling_interval [Integer] Polling interval in seconds
@@ -91,6 +94,9 @@ module FlagKit
     # @param bootstrap_verification_on_failure [String] Action on verification failure: 'warn', 'error', or 'ignore'
     # @param error_sanitization_enabled [Boolean] Enable sanitization of sensitive info from error messages
     # @param error_sanitization_preserve_original [Boolean] Preserve original message in addition to sanitized
+    # @param on_usage_update [Proc, nil] Callback for usage metrics updates (receives UsageMetrics)
+    # @param on_subscription_error [Proc, nil] Callback when subscription error occurs in streaming (receives message)
+    # @param on_connection_limit_error [Proc, nil] Callback when connection limit is reached in streaming
     def initialize(
       api_key:,
       polling_interval: DEFAULT_POLLING_INTERVAL,
@@ -124,7 +130,10 @@ module FlagKit
       bootstrap_verification_max_age: DEFAULT_BOOTSTRAP_VERIFICATION_MAX_AGE,
       bootstrap_verification_on_failure: DEFAULT_BOOTSTRAP_VERIFICATION_ON_FAILURE,
       error_sanitization_enabled: DEFAULT_ERROR_SANITIZATION_ENABLED,
-      error_sanitization_preserve_original: DEFAULT_ERROR_SANITIZATION_PRESERVE_ORIGINAL
+      error_sanitization_preserve_original: DEFAULT_ERROR_SANITIZATION_PRESERVE_ORIGINAL,
+      on_usage_update: nil,
+      on_subscription_error: nil,
+      on_connection_limit_error: nil
     )
       @api_key = api_key
       @polling_interval = polling_interval
@@ -159,6 +168,9 @@ module FlagKit
       @bootstrap_verification_on_failure = bootstrap_verification_on_failure
       @error_sanitization_enabled = error_sanitization_enabled
       @error_sanitization_preserve_original = error_sanitization_preserve_original
+      @on_usage_update = on_usage_update
+      @on_subscription_error = on_subscription_error
+      @on_connection_limit_error = on_connection_limit_error
     end
 
     # Validates the options.
