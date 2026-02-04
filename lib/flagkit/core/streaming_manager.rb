@@ -15,6 +15,31 @@ module FlagKit
       FAILED = :failed
     end
 
+    # SSE error codes from server
+    STREAM_ERROR_CODES = {
+      TOKEN_INVALID: 'TOKEN_INVALID',
+      TOKEN_EXPIRED: 'TOKEN_EXPIRED',
+      SUBSCRIPTION_SUSPENDED: 'SUBSCRIPTION_SUSPENDED',
+      CONNECTION_LIMIT: 'CONNECTION_LIMIT',
+      STREAMING_UNAVAILABLE: 'STREAMING_UNAVAILABLE'
+    }.freeze
+
+    # SSE error event data structure
+    class StreamErrorData
+      # @return [String] Error code (one of STREAM_ERROR_CODES values)
+      attr_reader :code
+
+      # @return [String] Human-readable error message
+      attr_reader :message
+
+      # @param code [String] Error code
+      # @param message [String] Error message
+      def initialize(code:, message:)
+        @code = code
+        @message = message
+      end
+    end
+
     # Streaming configuration
     class StreamingConfig
       attr_reader :enabled, :reconnect_interval, :max_reconnect_attempts, :heartbeat_interval
@@ -48,9 +73,20 @@ module FlagKit
     # - Automatic reconnection with exponential backoff
     # - Graceful degradation to polling after max failures
     # - Heartbeat monitoring for connection health
+    # - SSE error event handling with appropriate callbacks
     class StreamingManager
       attr_reader :state
 
+      # @param base_url [String] Base URL for API endpoints
+      # @param get_api_key [Proc] Callable that returns the current API key
+      # @param config [StreamingConfig, nil] Streaming configuration
+      # @param on_flag_update [Proc] Callback when flag is updated
+      # @param on_flag_delete [Proc] Callback when flag is deleted
+      # @param on_flags_reset [Proc] Callback when all flags are reset
+      # @param on_fallback_to_polling [Proc] Callback when streaming fails and falls back to polling
+      # @param on_subscription_error [Proc, nil] Callback when subscription error occurs (e.g., suspended)
+      # @param on_connection_limit_error [Proc, nil] Callback when connection limit is reached
+      # @param logger [Object, nil] Logger instance
       def initialize(
         base_url:,
         get_api_key:,
@@ -59,6 +95,8 @@ module FlagKit
         on_flag_delete:,
         on_flags_reset:,
         on_fallback_to_polling:,
+        on_subscription_error: nil,
+        on_connection_limit_error: nil,
         logger: nil
       )
         @base_url = base_url
@@ -68,6 +106,8 @@ module FlagKit
         @on_flag_delete = on_flag_delete
         @on_flags_reset = on_flags_reset
         @on_fallback_to_polling = on_fallback_to_polling
+        @on_subscription_error = on_subscription_error
+        @on_connection_limit_error = on_connection_limit_error
         @logger = logger
 
         @state = StreamingState::DISCONNECTED
@@ -272,9 +312,74 @@ module FlagKit
 
         when 'heartbeat'
           @mutex.synchronize { @last_heartbeat = Time.now }
+
+        when 'error'
+          handle_stream_error(data)
         end
       rescue StandardError => e
         @logger&.warn("Failed to process event #{event_type}: #{e.message}")
+      end
+
+      # Handles SSE error events from server.
+      #
+      # Error codes:
+      # - TOKEN_INVALID: Re-authenticate completely
+      # - TOKEN_EXPIRED: Refresh token and reconnect
+      # - SUBSCRIPTION_SUSPENDED: Notify user, fall back to cached values
+      # - CONNECTION_LIMIT: Implement backoff or close other connections
+      # - STREAMING_UNAVAILABLE: Fall back to polling
+      #
+      # @param data [String] JSON error data
+      def handle_stream_error(data)
+        error_data = JSON.parse(data)
+        code = error_data['code']
+        message = error_data['message']
+
+        stream_error = StreamErrorData.new(code: code, message: message)
+
+        @logger&.warn("SSE error event received: code=#{code}, message=#{message}")
+
+        case code
+        when STREAM_ERROR_CODES[:TOKEN_EXPIRED]
+          # Token expired, refresh and reconnect
+          @logger&.info('Stream token expired, refreshing...')
+          cleanup
+          connect # Will fetch new token
+
+        when STREAM_ERROR_CODES[:TOKEN_INVALID]
+          # Token is invalid, need full re-authentication
+          @logger&.error('Stream token invalid, re-authenticating...')
+          cleanup
+          connect # Will fetch new token
+
+        when STREAM_ERROR_CODES[:SUBSCRIPTION_SUSPENDED]
+          # Subscription issue - notify and fall back
+          @logger&.error("Subscription suspended: #{message}")
+          @on_subscription_error&.call(message)
+          cleanup
+          @mutex.synchronize { @state = StreamingState::FAILED }
+          @on_fallback_to_polling.call
+
+        when STREAM_ERROR_CODES[:CONNECTION_LIMIT]
+          # Too many connections - implement backoff
+          @logger&.warn('Connection limit reached, backing off...')
+          @on_connection_limit_error&.call
+          handle_connection_failure
+
+        when STREAM_ERROR_CODES[:STREAMING_UNAVAILABLE]
+          # Streaming not available - fall back to polling
+          @logger&.warn('Streaming service unavailable, falling back to polling')
+          cleanup
+          @mutex.synchronize { @state = StreamingState::FAILED }
+          @on_fallback_to_polling.call
+
+        else
+          @logger&.warn("Unknown stream error code: #{code}")
+          handle_connection_failure
+        end
+      rescue JSON::ParserError => e
+        @logger&.warn("Failed to parse stream error: #{e.message}")
+        handle_connection_failure
       end
 
       def handle_connection_failure
