@@ -171,6 +171,8 @@ module FlagKit
           conn.headers["Accept"] = "application/json"
           conn.headers["X-API-Key"] = @current_api_key
           conn.headers["User-Agent"] = "FlagKit-Ruby/#{VERSION}"
+          conn.headers["X-FlagKit-SDK-Version"] = VERSION
+          conn.headers["X-FlagKit-SDK-Language"] = "ruby"
           conn.adapter Faraday.default_adapter
         end
       end
