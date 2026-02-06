@@ -9,6 +9,7 @@ require_relative "flagkit/error/flagkit_error"
 
 # Utils module
 require_relative "flagkit/utils/security"
+require_relative "flagkit/utils/version"
 
 # Types module
 require_relative "flagkit/types/flag_type"
