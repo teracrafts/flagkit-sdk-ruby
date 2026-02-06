@@ -334,9 +334,58 @@ module FlagKit
     end
 
     def fetch_initial_flags
-      process_flags_response(@http_client.get('/sdk/init'))
+      response = @http_client.get('/sdk/init')
+      process_flags_response(response)
+      check_version_metadata(response)
     rescue Error => e
       log(:warn, "Failed to fetch initial flags: #{e.message}")
+    end
+
+    # Check SDK version metadata from init response and emit appropriate warnings.
+    #
+    # Per spec, the SDK should parse and surface:
+    # - sdkVersionMin: Minimum required version (older may not work)
+    # - sdkVersionRecommended: Recommended version for optimal experience
+    # - sdkVersionLatest: Latest available version
+    # - deprecationWarning: Server-provided deprecation message
+    #
+    # @param response [Hash] The init response
+    def check_version_metadata(response)
+      metadata = response['metadata'] || response[:metadata]
+      return unless metadata
+
+      current_version = VERSION
+
+      # Check for server-provided deprecation warning first
+      deprecation_warning = metadata['deprecationWarning'] || metadata[:deprecationWarning]
+      if deprecation_warning && !deprecation_warning.empty?
+        log(:warn, "Deprecation Warning: #{deprecation_warning}")
+      end
+
+      # Check minimum version requirement
+      sdk_version_min = metadata['sdkVersionMin'] || metadata[:sdkVersionMin]
+      if sdk_version_min && Utils::Version.less_than?(current_version, sdk_version_min)
+        log(:error, "SDK version #{current_version} is below minimum required version #{sdk_version_min}. " \
+                    "Some features may not work correctly. Please upgrade the SDK.")
+      end
+
+      # Check recommended version
+      sdk_version_recommended = metadata['sdkVersionRecommended'] || metadata[:sdkVersionRecommended]
+      warned_about_recommended = false
+      if sdk_version_recommended && Utils::Version.less_than?(current_version, sdk_version_recommended)
+        log(:warn, "SDK version #{current_version} is below recommended version #{sdk_version_recommended}. " \
+                   "Consider upgrading for the best experience.")
+        warned_about_recommended = true
+      end
+
+      # Log if a newer version is available (info level, not a warning)
+      # Only log if we haven't already warned about recommended
+      sdk_version_latest = metadata['sdkVersionLatest'] || metadata[:sdkVersionLatest]
+      if sdk_version_latest &&
+         Utils::Version.less_than?(current_version, sdk_version_latest) &&
+         !warned_about_recommended
+        log(:info, "SDK version #{current_version} - a newer version #{sdk_version_latest} is available.")
+      end
     end
 
     def start_background_tasks
