@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
 module FlagKit
-  VERSION = "1.0.0"
+  VERSION = "1.0.1"
 end
