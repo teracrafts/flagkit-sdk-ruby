@@ -10,7 +10,7 @@ Gem::Specification.new do |spec|
 
   spec.summary       = "Official Ruby SDK for FlagKit feature flag management"
   spec.description   = "FlagKit Ruby SDK enables feature flag evaluation with local caching, background polling, and analytics tracking."
-  spec.homepage      = "https://github.com/flagkit/flagkit-ruby"
+  spec.homepage      = "https://github.com/teracrafts/flagkit-sdk"
   spec.license       = "MIT"
   spec.required_ruby_version = ">= 3.0.0"
 
