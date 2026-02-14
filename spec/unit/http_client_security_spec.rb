@@ -7,6 +7,42 @@ RSpec.describe FlagKit::Http::HttpClient, "Security Features" do
   let(:secondary_api_key) { "sdk_secondary987654321" }
   let(:circuit_breaker) { FlagKit::CircuitBreaker.new(failure_threshold: 5, reset_timeout: 30) }
 
+  describe ".get_base_url" do
+    after do
+      ENV.delete("FLAGKIT_MODE")
+    end
+
+    it "returns production URL by default" do
+      ENV.delete("FLAGKIT_MODE")
+      expect(described_class.get_base_url).to eq("https://api.flagkit.dev/api/v1")
+    end
+
+    it "returns local URL when FLAGKIT_MODE=local" do
+      ENV["FLAGKIT_MODE"] = "local"
+      expect(described_class.get_base_url).to eq("https://api.flagkit.on/api/v1")
+    end
+
+    it "returns beta URL when FLAGKIT_MODE=beta" do
+      ENV["FLAGKIT_MODE"] = "beta"
+      expect(described_class.get_base_url).to eq("https://api.beta.flagkit.dev/api/v1")
+    end
+
+    it "is case-insensitive" do
+      ENV["FLAGKIT_MODE"] = "LOCAL"
+      expect(described_class.get_base_url).to eq("https://api.flagkit.on/api/v1")
+    end
+
+    it "trims whitespace" do
+      ENV["FLAGKIT_MODE"] = " local "
+      expect(described_class.get_base_url).to eq("https://api.flagkit.on/api/v1")
+    end
+
+    it "falls through to production for unknown mode" do
+      ENV["FLAGKIT_MODE"] = "staging"
+      expect(described_class.get_base_url).to eq("https://api.flagkit.dev/api/v1")
+    end
+  end
+
   describe "request signing" do
     let(:http_client) do
       described_class.new(
