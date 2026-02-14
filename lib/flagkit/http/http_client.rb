@@ -39,6 +39,8 @@ module FlagKit
     # request signing, and key rotation support.
     class HttpClient
       BASE_URL = "https://api.flagkit.dev/api/v1"
+      BETA_BASE_URL = "https://api.beta.flagkit.dev/api/v1"
+      LOCAL_BASE_URL = "https://api.flagkit.on/api/v1"
       BASE_RETRY_DELAY = 1.0
       MAX_RETRY_DELAY = 30.0
       RETRY_MULTIPLIER = 2.0
@@ -46,12 +48,18 @@ module FlagKit
 
       attr_reader :timeout, :retry_attempts, :circuit_breaker
 
-      # Returns the base URL for the given local port, or the default production URL.
+      # Returns the base URL based on internal SDK mode.
       #
-      # @param local_port [Integer, nil] The local port number
       # @return [String] The base URL
-      def self.get_base_url(local_port)
-        local_port ? "http://localhost:#{local_port}/api/v1" : BASE_URL
+      def self.get_base_url
+        case ENV.fetch("FLAGKIT_MODE", "").strip.downcase
+        when "local"
+          LOCAL_BASE_URL
+        when "beta"
+          BETA_BASE_URL
+        else
+          BASE_URL
+        end
       end
 
       # Returns the currently active API key.
@@ -83,7 +91,6 @@ module FlagKit
       # @param retry_attempts [Integer] Number of retry attempts
       # @param circuit_breaker [CircuitBreaker] The circuit breaker
       # @param logger [Object, nil] Logger instance
-      # @param local_port [Integer, nil] Local development server port
       # @param secondary_api_key [String, nil] Secondary API key for rotation
       # @param key_rotation_grace_period [Integer] Grace period in seconds
       # @param enable_request_signing [Boolean] Enable HMAC-SHA256 request signing
@@ -94,13 +101,12 @@ module FlagKit
         retry_attempts:,
         circuit_breaker:,
         logger: nil,
-        local_port: nil,
         secondary_api_key: nil,
         key_rotation_grace_period: 300,
         enable_request_signing: true,
         on_usage_update: nil
       )
-        @base_url = self.class.get_base_url(local_port)
+        @base_url = self.class.get_base_url()
         @primary_api_key = api_key
         @secondary_api_key = secondary_api_key
         @current_api_key = api_key
